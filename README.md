@@ -87,10 +87,8 @@ use `main` as the production branch, `npm run typecheck` as the build command, a
 you explicitly need preview Workers. Discord credentials remain Cloudflare secrets and must never
 be committed to Git.
 
-> **Temporary maintainer reminder:** The Cloudflare Workers Builds settings currently report an
-> error retrieving GitHub account details, so automatic deployment after the repository reconnection
-> has not yet been confirmed. After the next update is pushed to `main`, verify that Cloudflare Builds
-> succeeds for the latest commit and that the production Worker is deployed. Remove this reminder
-> after both checks succeed.
+> **Deployment setup:** The production Worker is connected to this repository's `main` branch.
+> Cloudflare Workers Builds runs `npm run typecheck` and then `npm run deploy`; preview builds are
+> disabled. The first build after the repository reconnection is pending verification.
 
 This repository does not provide a shared production Worker. Deploy the Worker to your own Cloudflare account and configure your Worker root URL in SRL.
