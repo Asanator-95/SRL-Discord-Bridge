@@ -89,6 +89,7 @@ be committed to Git.
 
 > **Deployment setup:** The production Worker is connected to this repository's `main` branch.
 > Cloudflare Workers Builds runs `npm run typecheck` and then `npm run deploy`; preview builds are
-> disabled. The first build after the repository reconnection is pending verification.
+> disabled. The first post-reconnection build succeeded: typecheck passed, no D1 migrations were
+> pending, and Worker version `a7835cb5-73bd-417e-962d-d7d4d3685f1d` was deployed.
 
 This repository does not provide a shared production Worker. Deploy the Worker to your own Cloudflare account and configure your Worker root URL in SRL.
