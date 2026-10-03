@@ -104,7 +104,7 @@ export async function createResourceJobs(
   if (!files.length)
     throw new InboxError(
       400,
-      '没有找到可导入的 Discord 附件直链。支持 PNG、JSON、ZIP、TXT、聊天文件和图片；保存正文请用“保存帖子到SRL”。',
+      '没有找到可导入的 Discord 附件直链。支持 PNG、JSON、ZIP、TXT、聊天文件和图片；保存正文请用“保存帖子到SRL（云端暂存）”。',
     )
   if (files.length > 20 || files.some((file) => file.size > MAX_SIZE))
     throw new InboxError(400, '一次最多下载 20 个文件，单文件最多 4 GiB')
@@ -201,7 +201,7 @@ async function freshAttachment(job: ResourceJob, env: Env): Promise<Attachment> 
   if (!response.ok)
     throw new InboxError(
       410,
-      '附件直链已过期，Bot 无法刷新。请回 Discord 对原消息重新执行“下载资源到SRL”。',
+      '附件直链已过期，Bot 无法刷新。请回 Discord 对原消息重新执行“下载资源到SRL（云端暂存）”。',
     )
   const message = asRecord(await response.json())
   const fresh =

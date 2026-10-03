@@ -8,8 +8,8 @@ The Bridge is intentionally isolated from the SRL application. Each user deploys
 
 ## What it does
 
-SRL supports paired temporary queues: `保存帖子到SRL` saves a selected post;
-`下载资源到SRL` extracts supported Discord attachment links into a separate resource
+SRL supports paired temporary queues: `保存帖子到SRL（云端暂存）` saves a selected post;
+`下载资源到SRL（云端暂存）` extracts supported Discord attachment links into a separate resource
 queue. `/绑定资源库` uses a ten-minute one-time pairing code from SRL. Both queues
 target the paired library and retain tasks for seven days. Legacy `保存到资源库`
 and its one-time handoff remain available.
@@ -113,6 +113,17 @@ This repository contains no SRL library data, no Discord credentials and no user
 Paired post captures and resource task metadata expire after seven days. Library
 endpoint secrets are stored as hashes in D1. Downloaded binary files and local
 resource bindings stay on the client; the Bridge stores no permanent resource files.
+
+After updating the Worker, register commands in SRL connection settings to apply
+the names. Registration renames the two previous cloud commands in place and
+removes only their duplicate old names if both versions exist. Legacy direct
+handoff and unrelated commands are preserved. Already cached old cloud command
+interactions remain accepted. Worker backend updates alone do not require a new
+SRL APK or Discord App installation.
+
+The handoff page provides a compact progress receipt, an Android deep link and
+copy-to-Web/PWA actions. Status refresh does not claim the post. If clipboard
+access fails, a selectable temporary link remains available.
 
 After SRL confirms that a post has been saved and read back locally, the Worker
 deletes its cloud body, attachment metadata and all handoff payload chunks/aliases
