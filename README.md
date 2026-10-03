@@ -114,6 +114,16 @@ Paired post captures and resource task metadata expire after seven days. Library
 endpoint secrets are stored as hashes in D1. Downloaded binary files and local
 resource bindings stay on the client; the Bridge stores no permanent resource files.
 
+After SRL confirms that a post has been saved and read back locally, the Worker
+deletes its cloud body, attachment metadata and all handoff payload chunks/aliases
+atomically with the saved/waiting-binding receipt. After a resource is fully
+imported, its download URL and Discord channel/message identifiers are cleared.
+Downloading, failed imports and pending version choices retain their transport
+data for retry. Small status/deduplication receipts keep their existing expiry;
+completed tasks no longer provide a body or download URL, and repeated sharing
+does not restore the cleared data. Older completed tasks are also cleared by the
+next cleanup-triggering request. No Cron is configured for expired receipts.
+
 ## Development
 
 ```bash
