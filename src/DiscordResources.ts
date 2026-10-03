@@ -195,14 +195,16 @@ async function freshAttachment(job: ResourceJob, env: Env): Promise<Attachment> 
     `https://discord.com/api/v10/channels/${job.channel_id}/messages/${job.message_id}`,
     {
       headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}` },
-      redirect: 'error',
+      redirect: 'manual',
     },
   )
-  if (!response.ok)
+  if (!response.ok) {
+    await response.body?.cancel()
     throw new InboxError(
       410,
       '附件直链已过期，Bot 无法刷新。请回 Discord 对原消息重新执行“下载资源到SRL（云端暂存）”。',
     )
+  }
   const message = asRecord(await response.json())
   const fresh =
     message && messageAttachments(message).find((file) => file.identity === original.identity)
@@ -291,11 +293,13 @@ export async function handleResourceRequest(request: Request, env: Env): Promise
     if (!match[2]) return json({ ...summary(job), url: file.url })
     stage = 'download_attachment'
     const response = await fetch(file.url, {
-      redirect: 'error',
+      redirect: 'manual',
       headers: { 'Accept-Encoding': 'identity' },
     })
-    if (!response.ok || !response.body)
+    if (!response.ok || !response.body) {
+      await response.body?.cancel()
       throw new InboxError(502, '附件下载失败，请重试或重新发送直链')
+    }
     if (response.headers.get('content-type')?.toLowerCase().startsWith('text/html')) {
       await response.body.cancel()
       throw new InboxError(422, '链接返回网页，未作为资源导入')
