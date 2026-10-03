@@ -237,11 +237,22 @@ export async function handleResourceRequest(request: Request, env: Env): Promise
     const path = new URL(request.url).pathname
     const now = Date.now()
     if (path === '/inbox/resources' && request.method === 'GET') {
+      const after = new URL(request.url).searchParams.get('after')
+      const cursor = after === null ? undefined : /^(\d{1,13}):([a-f\d-]{36})$/u.exec(after)
+      if (after !== null && !cursor) throw new InboxError(400, 'invalid_resource_cursor')
       const rows = await env.DB.prepare(
         `SELECT * FROM inbox_resources WHERE library_id = ? AND expires_at > ?
+         AND (created_at > ? OR (created_at = ? AND id > ?))
          AND state NOT IN ('imported','failed','cancelled') ORDER BY created_at, id LIMIT ?`,
       )
-        .bind(target.library_id, now, PAGE + 1)
+        .bind(
+          target.library_id,
+          now,
+          Number(cursor?.[1] ?? 0),
+          Number(cursor?.[1] ?? 0),
+          cursor?.[2] ?? '',
+          PAGE + 1,
+        )
         .all<ResourceJob>()
       const recent = await env.DB.prepare(
         `SELECT * FROM inbox_resources WHERE library_id = ? AND expires_at > ?
