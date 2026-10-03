@@ -98,9 +98,17 @@ export async function createResourceJobs(
   const messageId = interaction.data?.target_id
   const message = messageId ? interaction.data?.resolved?.messages?.[messageId] : undefined
   const channelId = asString(message?.channel_id) || interaction.channel_id
-  if (!userId || !message || !validSnowflake(messageId) || !validSnowflake(channelId))
+  const direct = interaction.data?.type === 1 && interaction.data.name === '下载直链'
+  if (
+    !userId ||
+    (!direct && (!message || !validSnowflake(messageId) || !validSnowflake(channelId)))
+  )
     throw new InboxError(400, 'Discord 未提供完整的目标消息')
-  const files = messageAttachments(message)
+  const link = interaction.data?.options?.find(
+    (option) => option.name === '链接' && option.type === 3,
+  )?.value
+  const file = direct && typeof link === 'string' ? attachment(link.trim()) : undefined
+  const files = direct ? (file ? [file] : []) : messageAttachments(message!)
   if (!files.length)
     throw new InboxError(
       400,
@@ -132,8 +140,8 @@ export async function createResourceJobs(
        WHERE EXISTS (SELECT 1 FROM inbox_endpoints WHERE library_id = ? AND discord_user_id = ? AND is_default = 1 AND revoked_at IS NULL)
        ON CONFLICT(library_id, fingerprint) DO UPDATE SET
          url = CASE WHEN inbox_resources.state = 'imported' AND inbox_resources.expires_at > excluded.created_at THEN '' ELSE excluded.url END,
-         channel_id = CASE WHEN inbox_resources.state = 'imported' AND inbox_resources.expires_at > excluded.created_at THEN '' ELSE excluded.channel_id END,
-         message_id = CASE WHEN inbox_resources.state = 'imported' AND inbox_resources.expires_at > excluded.created_at THEN '' ELSE excluded.message_id END,
+         channel_id = CASE WHEN inbox_resources.state = 'imported' AND inbox_resources.expires_at > excluded.created_at THEN '' WHEN excluded.message_id = '' THEN inbox_resources.channel_id ELSE excluded.channel_id END,
+         message_id = CASE WHEN inbox_resources.state = 'imported' AND inbox_resources.expires_at > excluded.created_at THEN '' WHEN excluded.message_id = '' THEN inbox_resources.message_id ELSE excluded.message_id END,
          state = CASE WHEN inbox_resources.state IN ('failed','cancelled') OR inbox_resources.expires_at <= excluded.created_at THEN 'queued' ELSE inbox_resources.state END,
          error = CASE WHEN inbox_resources.state IN ('failed','cancelled') THEN NULL ELSE inbox_resources.error END,
          updated_at = excluded.updated_at, expires_at = excluded.expires_at`,
@@ -141,8 +149,8 @@ export async function createResourceJobs(
         crypto.randomUUID(),
         target.library_id,
         fingerprint,
-        channelId,
-        messageId,
+        direct ? '' : channelId!,
+        direct ? '' : messageId!,
         file.url,
         file.name,
         file.size,
@@ -190,6 +198,8 @@ async function freshAttachment(job: ResourceJob, env: Env): Promise<Attachment> 
     (/^[a-f\d]+$/iu.test(expiry) && Number.parseInt(expiry, 16) * 1_000 > Date.now() + 60_000)
   )
     return original
+  if (!validSnowflake(job.channel_id) || !validSnowflake(job.message_id))
+    throw new InboxError(410, '直链已过期，请重新复制有效下载链接并执行 /下载直链。')
   // Only reread the explicitly selected message; never scan other comments.
   const response = await fetch(
     `https://discord.com/api/v10/channels/${job.channel_id}/messages/${job.message_id}`,

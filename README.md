@@ -7,6 +7,12 @@ The Bridge is intentionally isolated from the SRL application. Each user deploys
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fjixiangruyi117%2FSRL-Discord-Bridge)
 
 ## What it does
+For Bot replies without a message Apps menu, copy the actual Discord attachment URL
+and run `/下载直链 链接:<download URL>`. This slash command uses the same paired resource
+queue and attachment deduplication as the message download command; it does not save
+post text. Only supported Discord CDN attachment URLs are accepted, not message links
+or arbitrary websites. Expired pasted links require a fresh URL; ephemeral messages
+cannot be reread by the Bot. Register commands again after updating the Worker.
 
 SRL supports paired temporary queues: `保存帖子到SRL（云端暂存）` saves a selected post;
 `下载资源到SRL（云端暂存）` extracts supported Discord attachment links into a separate resource

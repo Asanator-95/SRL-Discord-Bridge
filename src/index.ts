@@ -34,6 +34,7 @@ import {
 const COMMAND_NAME = '保存到资源库'
 const POST_COMMAND_NAME = '保存帖子到SRL（云端暂存）'
 const RESOURCE_COMMAND_NAME = '下载资源到SRL（云端暂存）'
+const DIRECT_RESOURCE_COMMAND_NAME = '下载直链'
 const PAIR_COMMAND_NAME = '绑定资源库'
 const INLINE_HANDOFF_MAX_BYTES = 1_800_000
 const HANDOFF_CHUNK_CHARACTERS = 250_000
@@ -230,6 +231,20 @@ async function registerMessageCommand(env: Env): Promise<void> {
     { name: POST_COMMAND_NAME, type: 3 },
     { name: RESOURCE_COMMAND_NAME, type: 3 },
     {
+      name: DIRECT_RESOURCE_COMMAND_NAME,
+      type: 1,
+      description: '将 Discord 附件直链云端暂存到已配对资源库，不保存帖子',
+      options: [
+        {
+          name: '链接',
+          type: 3,
+          description: 'Discord 文件下载直链，不是消息地址',
+          required: true,
+          max_length: 4096,
+        },
+      ],
+    },
+    {
       name: PAIR_COMMAND_NAME,
       type: 1,
       description: '将帖子和资源下载任务投递到当前资源库',
@@ -299,6 +314,7 @@ async function readMessageCommandStatus(env: Env): Promise<boolean> {
     [COMMAND_NAME, 3],
     [POST_COMMAND_NAME, 3],
     [RESOURCE_COMMAND_NAME, 3],
+    [DIRECT_RESOURCE_COMMAND_NAME, 1],
     [PAIR_COMMAND_NAME, 1],
   ].every(([name, type]) =>
     payload.some((item) => {
@@ -545,8 +561,9 @@ async function handleInteraction(
     (commandName === POST_COMMAND_NAME || commandName === '保存帖子到SRL')
   if (
     interaction.type === 2 &&
-    interaction.data?.type === 3 &&
-    (commandName === RESOURCE_COMMAND_NAME || commandName === '下载资源到SRL')
+    ((interaction.data?.type === 3 &&
+      (commandName === RESOURCE_COMMAND_NAME || commandName === '下载资源到SRL')) ||
+      (interaction.data?.type === 1 && commandName === DIRECT_RESOURCE_COMMAND_NAME))
   ) {
     ctx.waitUntil(
       (async () => {
@@ -661,6 +678,7 @@ export default {
           commandName: COMMAND_NAME,
           postCommandName: POST_COMMAND_NAME,
           resourceCommandName: RESOURCE_COMMAND_NAME,
+          directResourceCommandName: DIRECT_RESOURCE_COMMAND_NAME,
           pairCommandName: PAIR_COMMAND_NAME,
         })
       } catch {
