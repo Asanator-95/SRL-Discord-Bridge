@@ -377,10 +377,10 @@ export async function handleInboxHandoff(
 
 export async function cleanupInbox(env: Env, now: number): Promise<void> {
   await env.DB.batch([
-    acknowledgedPayloadDeletion(env),
     env.DB.prepare('DELETE FROM inbox_pair_codes WHERE expires_at <= ?').bind(now),
     env.DB.prepare('DELETE FROM inbox_deliveries WHERE expires_at <= ?').bind(now),
   ])
+  await acknowledgedPayloadDeletion(env).run()
 }
 
 function listItem(delivery: Delivery) {

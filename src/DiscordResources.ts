@@ -312,10 +312,8 @@ export async function handleResourceRequest(request: Request, env: Env): Promise
 }
 
 export async function cleanupResources(env: Env, now: number): Promise<void> {
-  await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE inbox_resources SET url = '', channel_id = '', message_id = '', error = NULL WHERE state = 'imported' AND (url <> '' OR channel_id <> '' OR message_id <> '' OR error IS NOT NULL)",
-    ),
-    env.DB.prepare('DELETE FROM inbox_resources WHERE expires_at <= ?').bind(now),
-  ])
+  await env.DB.prepare('DELETE FROM inbox_resources WHERE expires_at <= ?').bind(now).run()
+  await env.DB.prepare(
+    "UPDATE inbox_resources SET url = '', channel_id = '', message_id = '', error = NULL WHERE state = 'imported' AND (url <> '' OR channel_id <> '' OR message_id <> '' OR error IS NOT NULL)",
+  ).run()
 }
