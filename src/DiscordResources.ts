@@ -218,8 +218,10 @@ async function freshAttachment(job: ResourceJob, env: Env): Promise<Attachment> 
 }
 
 export async function handleResourceRequest(request: Request, env: Env): Promise<Response> {
+  let stage = 'authenticate'
   try {
     const target = await authenticatedEndpoint(request, env)
+    stage = 'read_task'
     const path = new URL(request.url).pathname
     const now = Date.now()
     if (path === '/inbox/resources' && request.method === 'GET') {
@@ -250,6 +252,7 @@ export async function handleResourceRequest(request: Request, env: Env): Promise
       .first<ResourceJob>()
     if (!job) throw new InboxError(404, 'resource_task_not_found_or_expired')
     if (request.method === 'POST' && match[2] === 'ack') {
+      stage = 'acknowledge'
       const body = await requestBody(request)
       if (!(STATES as readonly unknown[]).includes(body.state))
         throw new InboxError(400, 'invalid_state')
@@ -283,8 +286,10 @@ export async function handleResourceRequest(request: Request, env: Env): Promise
     if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, { status: 405 })
     if (job.state === 'imported')
       return json({ error: 'resource_already_imported', state: job.state }, { status: 409 })
+    stage = 'resolve_attachment'
     const file = await freshAttachment(job, env)
     if (!match[2]) return json({ ...summary(job), url: file.url })
+    stage = 'download_attachment'
     const response = await fetch(file.url, {
       redirect: 'error',
       headers: { 'Accept-Encoding': 'identity' },
@@ -307,6 +312,24 @@ export async function handleResourceRequest(request: Request, env: Env): Promise
     // Pass the CDN stream through without materializing binary contents in D1 or Worker memory.
     return new Response(response.body, { headers })
   } catch (error) {
+    if (!(error instanceof InboxError)) {
+      let message = error instanceof Error ? error.message : 'Unknown error'
+      const credentials = [
+        env.DISCORD_BOT_TOKEN,
+        request.headers.get('Authorization')?.replace(/^Bearer\s+/iu, ''),
+      ]
+      for (const credential of credentials)
+        if (credential) message = message.replaceAll(credential, '[credential]')
+      message = message
+        .replace(/https?:\/\/[^\s"'<>]+/giu, '[url]')
+        .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/giu, '[email]')
+        .slice(0, 240)
+      console.error('Discord resource request failed', {
+        stage,
+        name: error instanceof Error ? error.name : 'UnknownError',
+        message,
+      })
+    }
     return inboxErrorResponse(error)
   }
 }
