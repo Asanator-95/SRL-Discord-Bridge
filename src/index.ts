@@ -222,6 +222,67 @@ async function readCurrentBotApplication(env: Env): Promise<Record<string, unkno
   return application
 }
 
+async function commandRegistrationFailure(response: Response, name: string): Promise<Error> {
+  const body = asRecord(await response.json().catch(() => undefined))
+  const code = asNumber(body?.code)
+  const retryAfter = asNumber(body?.retry_after)
+  const errors = asRecord(body?.errors)
+  const fields = ['name', 'description', 'options', 'integration_types', 'contexts'].filter(
+    (field) => errors?.[field] !== undefined,
+  )
+  // Fixed command names, numeric codes and known field names only; never upstream text or secrets.
+  console.warn('Discord command registration rejected', {
+    command: name,
+    status: response.status,
+    code,
+    fields,
+    retryAfter,
+  })
+  return new Error(
+    `Discord 指令「${name}」注册失败（HTTP ${response.status}${code !== undefined ? `，错误码 ${code}` : ''}${fields.length ? `，字段 ${fields.join('、')}` : ''}）${response.status === 429 ? `；请${retryAfter !== undefined ? `等待 ${Math.ceil(retryAfter)} 秒后` : '稍后'}再注册` : ''}`,
+  )
+}
+
+function commandMatches(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected))
+    return (
+      Array.isArray(actual) &&
+      actual.length === expected.length &&
+      expected.every((item, index) => commandMatches(actual[index], item))
+    )
+  const record = asRecord(expected)
+  if (record) {
+    const candidate = asRecord(actual)
+    return Boolean(
+      candidate &&
+      Object.entries(record).every(([key, value]) => commandMatches(candidate[key], value)),
+    )
+  }
+  return actual === expected
+}
+
+async function writeDiscordCommand(url: string, init: RequestInit): Promise<Response> {
+  let waited = 0
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(url, init)
+    if (response.status !== 429 || attempt >= 2) return response
+    const body = asRecord(
+      await response
+        .clone()
+        .json()
+        .catch(() => undefined),
+    )
+    const seconds = asNumber(body?.retry_after) ?? Number(response.headers.get('Retry-After'))
+    const milliseconds = Math.ceil(seconds * 1000)
+    // Existing SRL registration UI aborts at 8 seconds; never hold it for a long rate limit.
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0 || waited + milliseconds > 4000)
+      return response
+    waited += milliseconds
+    await response.body?.cancel()
+    await new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
+  }
+}
+
 async function registerMessageCommand(env: Env): Promise<void> {
   if (!env.DISCORD_APPLICATION_ID || !env.DISCORD_BOT_TOKEN) {
     throw new Error('Discord Application ID / Bot Token 未配置')
@@ -288,7 +349,12 @@ async function registerMessageCommand(env: Env): Promise<void> {
       return value?.name === command.name && value?.type === command.type
     })
     const migrate = oldCommand && !alreadyRenamed
-    const response = await fetch(
+    const payload = { ...command, integration_types: [1], contexts: [0, 1, 2] }
+    const current = existing
+      .map(asRecord)
+      .find((item) => item?.name === command.name && item?.type === command.type)
+    if (commandMatches(current, payload) && !oldCommand) continue
+    const response = await writeDiscordCommand(
       discordApplicationCommandsUrl(env) +
         (migrate ? '/' + encodeURIComponent(asString(oldCommand.id)) : ''),
       {
@@ -297,15 +363,11 @@ async function registerMessageCommand(env: Env): Promise<void> {
           Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...command,
-          integration_types: [1],
-          contexts: [0, 1, 2],
-        }),
+        body: JSON.stringify(payload),
       },
     )
     if (!response.ok) {
-      throw new Error(`Discord command registration failed: ${response.status}`)
+      throw await commandRegistrationFailure(response, command.name)
     }
     if (oldCommand && alreadyRenamed) {
       const removed = await fetch(
