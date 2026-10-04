@@ -12,7 +12,6 @@ import {
 import {
   DISCORD_SNOWFLAKE_PATTERN,
   DiscordCaptureContext,
-  DiscordInteraction,
   DiscordGuildMetadata,
   DiscordSavedMessageCheckRequest,
   DiscordSourceReadFailure,
@@ -562,89 +561,4 @@ export async function handleSavedMessageCheck(request: Request, env: Env): Promi
       { status: 502 },
     )
   }
-}
-
-export class ThreadCommandError extends Error {}
-
-// Explicit user-selected messages only; do not scan ordinary comments.
-export async function readThreadCommandCaptures(
-  env: Env,
-  interaction: DiscordInteraction,
-  pinned: boolean,
-): Promise<Array<Record<string, unknown>>> {
-  async function read(path: string, operation: string): Promise<unknown> {
-    const response = await discordApi(env, path)
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new ThreadCommandError(
-        `${operation}失败（HTTP ${response.status}）。请确认 Bot 已加入服务器并拥有查看频道／读取消息历史权限。`,
-      )
-    }
-    return discordJson(response, operation)
-  }
-  const channelId = interaction.channel_id
-  if (!validSnowflake(channelId)) throw new ThreadCommandError('请在要保存的帖子内使用这个指令。')
-  const channel = asRecord(await read(`/channels/${channelId}`, '读取帖子'))
-  if (!channel || !THREAD_CHANNEL_TYPES.has(asNumber(channel.type) ?? -1))
-    throw new ThreadCommandError('请进入具体帖子后使用，不要在频道首页使用。')
-  const parentId = asString(channel.parent_id)
-  if (!validSnowflake(parentId)) throw new ThreadCommandError('无法确认帖子的所属频道。')
-  const parent = asRecord(await read(`/channels/${parentId}`, '读取帖子频道'))
-  if (parent?.type !== 15 && parent?.type !== 16)
-    throw new ThreadCommandError('目前支持论坛／媒体频道的帖子，请在帖子内使用。')
-  const context: DiscordCaptureContext = {
-    guildId: interaction.guild_id,
-    channelId,
-    channelName: asString(parent.name),
-    threadId: channelId,
-    starterMessageId: channelId,
-    title: asString(channel.name),
-    forumTags: readForumTags({ ...parent, applied_tags: channel.applied_tags }),
-  }
-  const messages = new Map<string, Record<string, unknown>>()
-  if (!pinned) {
-    const message = asRecord(await read(`/channels/${channelId}/messages/${channelId}`, '读取首楼'))
-    if (!message) throw new ThreadCommandError('首楼消息无法读取。')
-    messages.set(channelId, message)
-  } else {
-    let before: string | undefined
-    for (let page = 0; page < 4; page += 1) {
-      const query = new URLSearchParams({ limit: '50', ...(before ? { before } : {}) })
-      const payload = asRecord(
-        await read(`/channels/${channelId}/messages/pins?${query}`, '读取已标注消息'),
-      )
-      if (!payload || !Array.isArray(payload.items) || typeof payload.has_more !== 'boolean')
-        throw new ThreadCommandError('Discord 已标注消息列表格式异常，未投递。')
-      for (const item of payload.items) {
-        const message = asRecord(asRecord(item)?.message)
-        if (!message || !validSnowflake(asString(message.id)))
-          throw new ThreadCommandError('已标注消息无法完整读取，未投递。')
-        messages.set(asString(message.id), { ...message, pinned: true })
-      }
-      if (!payload.has_more) break
-      const cursor = asString(asRecord(payload.items.at(-1))?.pinned_at)
-      if (
-        !cursor ||
-        !Number.isFinite(Date.parse(cursor)) ||
-        (before && Date.parse(cursor) >= Date.parse(before))
-      )
-        throw new ThreadCommandError('已标注消息分页异常，未投递。')
-      if (page === 3)
-        throw new ThreadCommandError('已标注消息超过单次 200 条上限，请分条保存；本次未投递。')
-      before = cursor
-    }
-  }
-  return [...messages.values()]
-    .sort((a, b) => compareSnowflakes(asString(a.id), asString(b.id)))
-    .map((message) => {
-      const capture = buildCaptureFromMessage(message, context)
-      if (!capture) throw new ThreadCommandError('消息作者或正文元数据不完整，未投递。')
-      if (
-        !asString(capture.content) &&
-        !(capture.attachments as unknown[]).length &&
-        !(capture.embeds as unknown[]).length
-      )
-        throw new ThreadCommandError('消息内容为空或 Bot 未开启 Message Content 权限，未投递。')
-      return capture
-    })
 }

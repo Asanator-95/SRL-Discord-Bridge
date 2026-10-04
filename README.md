@@ -14,6 +14,17 @@ post text. Only supported Discord CDN attachment URLs are accepted, not message 
 or arbitrary websites. Expired pasted links require a fresh URL; ephemeral messages
 cannot be reread by the Bot. Register commands again after updating the Worker.
 
+If you cannot use Discord's message Apps menu, copy the Bot message text and run
+`/粘贴收件 正文内容:<copied message text>` in a private Discord context. The command
+extracts supported Discord CDN attachment links and queues them in the paired library;
+it does not save the pasted post text. The Bot does not need access to the original
+server. Expired signed links must be copied again. `/下载直链` remains available for
+a single copied attachment URL.
+
+The unsupported `/保存首楼帖子` and `/保存所有已标注信息` commands have been removed.
+Register commands again after deploying this update to remove any old entries from the
+Discord App.
+
 SRL supports paired temporary queues: `保存帖子到SRL（云端暂存）` saves a selected post;
 `下载资源到SRL（云端暂存）` extracts supported Discord attachment links into a separate resource
 queue. `/绑定资源库` uses a ten-minute one-time pairing code from SRL. Both queues
