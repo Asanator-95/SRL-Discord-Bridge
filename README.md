@@ -176,3 +176,14 @@ the Discord commands again. Deploying the Worker alone does not register command
 with Discord. Update the Android shell before enabling native resource intake.
 
 This repository does not provide a shared production Worker. Deploy the Worker to your own Cloudflare account and configure your Worker root URL in SRL.
+
+Inside a forum/media post, `/保存首楼帖子` saves the starter without scrolling;
+`/保存所有已标注信息` saves the post's pinned messages (up to 200 per invocation).
+Both commands require an existing pairing and Bot channel/history access plus
+Message Content access. Pins use the paginated Discord pins API, not a scan of
+ordinary comments. Delivery reuses the post inbox and its deduplication. If a
+batch fails partway, its receipt reports the accepted count; rerunning reuses
+accepted snapshots. A changed pairing stops the batch instead of routing later
+messages to another library. Register commands again after deploying this update.
+SRL's thread navigation shows saved pinned snapshots under “已标注信息”; legacy
+snapshots need resaving or a successful update check to learn their pin state.

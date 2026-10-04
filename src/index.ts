@@ -11,6 +11,7 @@ import {
 import { DiscordInteraction, Env } from './DiscordSourceProtocol'
 import {
   cleanupInbox,
+  InboxError,
   createInboxDelivery,
   handleInboxHandoff,
   handleInboxRequest,
@@ -18,7 +19,13 @@ import {
   interactionUserId,
   pairDiscordUser,
 } from './DiscordInbox'
-import { discordJson, handleSavedMessageCheck, handleSourceRead } from './DiscordSourceReader'
+import {
+  discordJson,
+  handleSavedMessageCheck,
+  handleSourceRead,
+  readThreadCommandCaptures,
+  ThreadCommandError,
+} from './DiscordSourceReader'
 import { cleanupResources, createResourceJobs, handleResourceRequest } from './DiscordResources'
 import {
   CORS_HEADERS,
@@ -35,6 +42,8 @@ const COMMAND_NAME = '保存到资源库'
 const POST_COMMAND_NAME = '保存帖子到SRL（云端暂存）'
 const RESOURCE_COMMAND_NAME = '下载资源到SRL（云端暂存）'
 const DIRECT_RESOURCE_COMMAND_NAME = '下载直链'
+const STARTER_COMMAND_NAME = '保存首楼帖子'
+const PINS_COMMAND_NAME = '保存所有已标注信息'
 const PAIR_COMMAND_NAME = '绑定资源库'
 const INLINE_HANDOFF_MAX_BYTES = 1_800_000
 const HANDOFF_CHUNK_CHARACTERS = 250_000
@@ -227,6 +236,18 @@ async function registerMessageCommand(env: Env): Promise<void> {
     [RESOURCE_COMMAND_NAME, '下载资源到SRL'],
   ])
   const commands = [
+    {
+      name: STARTER_COMMAND_NAME,
+      type: 1,
+      description: '保存当前帖子首楼到已配对资源库（云端暂存）',
+      contexts: [0],
+    },
+    {
+      name: PINS_COMMAND_NAME,
+      type: 1,
+      description: '保存当前帖子全部已标注／置顶消息（云端暂存，单次最多200条）',
+      contexts: [0],
+    },
     { name: COMMAND_NAME, type: 3 },
     { name: POST_COMMAND_NAME, type: 3 },
     { name: RESOURCE_COMMAND_NAME, type: 3 },
@@ -316,6 +337,8 @@ async function readMessageCommandStatus(env: Env): Promise<boolean> {
     [RESOURCE_COMMAND_NAME, 3],
     [DIRECT_RESOURCE_COMMAND_NAME, 1],
     [PAIR_COMMAND_NAME, 1],
+    [STARTER_COMMAND_NAME, 1],
+    [PINS_COMMAND_NAME, 1],
   ].every(([name, type]) =>
     payload.some((item) => {
       const command = asRecord(item)
@@ -375,6 +398,60 @@ async function finishInboxCommand(
       interaction,
       env,
       `操作失败：${error instanceof Error ? error.message : '请稍后重试'}`,
+    )
+  }
+}
+
+async function finishThreadCommand(interaction: DiscordInteraction, env: Env): Promise<void> {
+  let delivered = 0
+  try {
+    const userId = interactionUserId(interaction)
+    if (!userId) throw new InboxError(400, '无法确认执行命令的 Discord 用户。')
+    const endpoint = await env.DB.prepare(
+      'SELECT library_id, name FROM inbox_endpoints WHERE discord_user_id = ? AND revoked_at IS NULL AND is_default = 1',
+    )
+      .bind(userId)
+      .first<{ library_id: string; name: string }>()
+    if (!endpoint) throw new InboxError(400, '请先在资源库生成配对码，再执行 /绑定资源库。')
+    const captures = await readThreadCommandCaptures(
+      env,
+      interaction,
+      interaction.data?.name === PINS_COMMAND_NAME,
+    )
+    if (!captures.length) {
+      await updateDeferredInteraction(
+        interaction,
+        env,
+        '当前帖子没有可读取的已标注／置顶消息。请确认 Bot 拥有查看频道及读取消息历史权限。',
+      )
+      return
+    }
+    for (const capture of captures) {
+      await createInboxDelivery(
+        env,
+        userId,
+        await addTextAttachmentContent(capture),
+        await inboxCaptureFingerprint(capture),
+        inboxStore,
+        Date.now(),
+        endpoint.library_id,
+      )
+      delivered += 1
+    }
+    await updateDeferredInteraction(
+      interaction,
+      env,
+      `已接收 ${delivered} 条消息，投递到「${endpoint.name}」；重复内容沿用原收件记录，云端暂存最多 7 天。设备领取保存后可查看整理状态。`,
+    )
+  } catch (error) {
+    const reason =
+      error instanceof ThreadCommandError || error instanceof InboxError
+        ? error.message
+        : '读取或投递未完成，请稍后重新执行。'
+    await updateDeferredInteraction(
+      interaction,
+      env,
+      `已接收 ${delivered} 条；${reason} 已接收内容保留，重新执行会去重。`,
     )
   }
 }
@@ -553,6 +630,20 @@ async function handleInteraction(
   }
 
   const commandName = interaction.data?.name
+  if (
+    interaction.type === 2 &&
+    interaction.data?.type === 1 &&
+    (commandName === STARTER_COMMAND_NAME || commandName === PINS_COMMAND_NAME)
+  ) {
+    if (!interaction.token || !interactionUserId(interaction))
+      return json({
+        type: 4,
+        data: { content: '无法确认 Discord 命令身份，请重新操作。', flags: 64 },
+      })
+    ctx.waitUntil(finishThreadCommand(interaction, env))
+    ctx.waitUntil(cleanupExpired(env).catch(() => console.error('Discord inbox cleanup failed')))
+    return json({ type: 5, data: { flags: 64 } })
+  }
   const isPairCommand =
     interaction.type === 2 && interaction.data?.type === 1 && commandName === PAIR_COMMAND_NAME
   const isPostCommand =
